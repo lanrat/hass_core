@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime
 import logging
 import os
 from typing import Any
@@ -26,6 +27,7 @@ DOMAIN = "keyboard_remote"
 
 ICON = "mdi:remote"
 
+KEY = "key"
 KEY_CODE = "key_code"
 KEY_VALUE = {"key_up": 0, "key_down": 1, "key_hold": 2}
 KEY_VALUE_NAME = {value: key for key, value in KEY_VALUE.items()}
@@ -37,6 +39,11 @@ TYPE = "type"
 EMULATE_KEY_HOLD = "emulate_key_hold"
 EMULATE_KEY_HOLD_DELAY = "emulate_key_hold_delay"
 EMULATE_KEY_HOLD_REPEAT = "emulate_key_hold_repeat"
+KEY_PRESS = "key_press"
+KEY_PRESS_SHORT_SEC = 1
+KEY_PRESS_LONG_SEC = 3
+KEY_PRESS_SHORT = "press_short"
+KEY_PRESS_LONG = "press_long"
 
 DEVINPUT = "/dev/input"
 
@@ -55,6 +62,7 @@ CONFIG_SCHEMA = vol.Schema(
                         vol.Optional(EMULATE_KEY_HOLD, default=False): cv.boolean,
                         vol.Optional(EMULATE_KEY_HOLD_DELAY, default=0.250): float,
                         vol.Optional(EMULATE_KEY_HOLD_REPEAT, default=0.033): float,
+                        vol.Optional(KEY_PRESS, default=False): cv.boolean,
                     }
                 ),
                 cv.has_at_least_one_key(DEVICE_DESCRIPTOR, DEVICE_ID_GROUP),
@@ -249,6 +257,8 @@ class KeyboardRemote:
             self.emulate_key_hold = dev_block[EMULATE_KEY_HOLD]
             self.emulate_key_hold_delay = dev_block[EMULATE_KEY_HOLD_DELAY]
             self.emulate_key_hold_repeat = dev_block[EMULATE_KEY_HOLD_REPEAT]
+            self.key_press = dev_block[KEY_PRESS]
+            self.key_history: dict[int, datetime] = {}
             self.monitor_task = None
             self.dev = None
             self.config_descriptor = dev_block.get(DEVICE_DESCRIPTOR)
@@ -275,6 +285,7 @@ class KeyboardRemote:
             _LOGGER.debug("Keyboard async_device_start_monitoring, %s", dev.name)
             if self.monitor_task is None:
                 self.dev = dev
+                self.key_history = {}
                 # set the descriptor to the one provided to the config if any, falling back to the device path if not set
                 if self.config_descriptor:
                     self.descriptor = self.config_descriptor
@@ -316,6 +327,7 @@ class KeyboardRemote:
                 )
                 _LOGGER.debug("Keyboard disconnected, %s", self.dev.name)
                 self.dev = None
+                self.key_history = {}
                 self.descriptor = self.config_descriptor
 
         async def async_device_monitor_input(self):
@@ -333,6 +345,48 @@ class KeyboardRemote:
                 async for event in self.dev.async_read_loop():
                     # pylint: disable=no-member
                     if event.type is ecodes.EV_KEY:
+                        # check for, update, and send press events
+                        if self.key_press:
+                            if event.value == KEY_VALUE["key_down"]:
+                                self.key_history[event.code] = datetime.now()
+                            if (
+                                event.value == KEY_VALUE["key_up"]
+                                and event.code in self.key_history
+                            ):
+                                delta = datetime.now() - self.key_history[event.code]
+                                delta_secs = delta.total_seconds()
+                                press = None
+                                # short press
+                                if delta_secs <= KEY_PRESS_SHORT_SEC:
+                                    press = KEY_PRESS_SHORT
+                                # long press
+                                if (
+                                    KEY_PRESS_SHORT_SEC
+                                    < delta_secs
+                                    <= KEY_PRESS_LONG_SEC
+                                ):
+                                    press = KEY_PRESS_LONG
+                                if press:
+                                    _LOGGER.debug(
+                                        "device: %s: key press (%s) %f, %d (%s)",
+                                        self.dev.name,
+                                        press,
+                                        delta_secs,
+                                        event.code,
+                                        ecodes.keys.get(event.code),
+                                    )
+                                    self.hass.bus.async_fire(
+                                        KEYBOARD_REMOTE_COMMAND_RECEIVED,
+                                        {
+                                            KEY_CODE: event.code,
+                                            KEY: ecodes.keys.get(event.code),
+                                            TYPE: press,
+                                            DEVICE_DESCRIPTOR: self.descriptor,
+                                            DEVICE_NAME: self.dev.name,
+                                        },
+                                    )
+
+                        # check for and send event codes
                         if event.value in self.key_values:
                             _LOGGER.debug(
                                 "device: %s: %s", self.dev.name, categorize(event)
@@ -342,6 +396,7 @@ class KeyboardRemote:
                                 KEYBOARD_REMOTE_COMMAND_RECEIVED,
                                 {
                                     KEY_CODE: event.code,
+                                    KEY: ecodes.keys.get(event.code),
                                     TYPE: KEY_VALUE_NAME[event.value],
                                     DEVICE_DESCRIPTOR: self.descriptor,
                                     DEVICE_NAME: self.dev.name,
