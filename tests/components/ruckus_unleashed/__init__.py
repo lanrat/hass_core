@@ -1,8 +1,12 @@
 """Tests for the Ruckus Unleashed integration."""
-import asyncio
+import aiohttp
+from aioruckus import AjaxSession, RuckusApi
+from typing import Any, List
+
+
 from unittest.mock import AsyncMock, patch
 
-from homeassistant.components.ruckus_unleashed import DOMAIN, aioruckus
+from homeassistant.components.ruckus_unleashed import DOMAIN
 from homeassistant.components.ruckus_unleashed.const import (
     API_AP_DEVNAME,
     API_AP_MAC,
@@ -90,42 +94,99 @@ def mock_config_entry() -> MockConfigEntry:
     )
 
 
-class MockAjaxSession:
-    """Mock Ruckus Ajax Session."""
+# class MockAjaxSession:
+#     """Mock Ruckus Ajax Session."""
+
+#     def __init__(
+#         self,
+#         websession,
+#         host: str,
+#         username: str,
+#         password: str,
+#         auto_cleanup_websession=False,
+#     ) -> None:
+#         """Mock init."""
+#         self.websession = websession
+#         self.host = host
+#         self.username = username
+#         self.password = password
+#         # self.api = RuckusApi(self)
+#         self.api = aioruckus.RuckusAjaxApi(self)
+
+#     async def __aenter__(self, *args, **kwargs) -> "MockAjaxSession":
+#         """Async enter."""
+#         return self
+
+#     async def __aexit__(self, *args, **kwargs) -> None:
+#         """Async exit."""
+
+#     async def login(self) -> None:
+#         """Mock login."""
+#         print("IDF: login()")
+
+#     async def close(self) -> None:
+#         """Mock close."""
+
+#     @classmethod
+#     def async_create(cls, host: str, username: str, password: str) -> "MockAjaxSession":
+#         """Mock async_create."""
+#         print("IDF: async_create()")
+#         return MockAjaxSession(None, host, username, password, True)
+
+
+class MockSession(AjaxSession):
+    """Mock Session"""
 
     def __init__(
         self,
-        websession,
+        websession: aiohttp.ClientSession,
         host: str,
         username: str,
         password: str,
         auto_cleanup_websession=False,
     ) -> None:
-        """Mock init."""
-        self.websession = websession
-        self.host = host
-        self.username = username
-        self.password = password
-        # self.api = RuckusApi(self)
-        self.api = aioruckus.RuckusAjaxApi(self)
+        super().__init__(websession, host, username, password, auto_cleanup_websession)
+        self.mock_results = {}
+        self._api = MockApi(self)
 
-    async def __aenter__(self, *args, **kwargs) -> "MockAjaxSession":
-        """Async enter."""
+    async def __aenter__(self) -> "AjaxSession":
         return self
 
-    async def __aexit__(self, *args, **kwargs) -> None:
-        """Async exit."""
+    async def __aexit__(self, *exc: Any) -> None:
+        pass
 
     async def login(self) -> None:
-        """Mock login."""
+        pass
 
     async def close(self) -> None:
-        """Mock close."""
+        pass
+
+    @property
+    def api(self) -> "MockApi":
+        return self._api
 
     @classmethod
-    def async_create(cls, host: str, username: str, password: str) -> "MockAjaxSession":
-        """Mock async_create."""
-        return MockAjaxSession(None, host, username, password, True)
+    def async_create(cls, host: str, username: str, password: str) -> "AjaxSession":
+        return MockSession(None, host, username, password, True)
+
+    # IDF item : ConfigItem
+    async def get_conf_str(self, item, timeout: int | None = None) -> str:
+        return self.mock_results[item.value]
+
+
+class MockApi(RuckusApi):
+    """Mock Session"""
+
+    def __init__(self, session: MockSession):
+        self.session = session
+
+    async def get_active_clients(self, interval_stats: bool = False) -> List:
+        """Mock get_active_clients"""
+        if interval_stats:
+            raise NotImplementedError(self)
+        else:
+            result_text = self.session.mock_results["active-client-stats1"]
+            return self._ruckus_xml_unwrap(result_text, ["client"])
 
 
 async def init_integration(hass: HomeAssistant) -> MockConfigEntry:
@@ -139,23 +200,24 @@ async def init_integration(hass: HomeAssistant) -> MockConfigEntry:
         connections={(dr.CONNECTION_NETWORK_MAC, TEST_CLIENT[API_CLIENT_MAC])},
     )
     with patch(
-        "homeassistant.components.ruckus_unleashed.RuckusUnleashedDataUpdateCoordinator._fetch_clients",
-        return_value={
-            TEST_CLIENT[API_CLIENT_AP_MAC]: TEST_CLIENT,
-        },
-    ), patch(
-        "homeassistant.components.ruckus_unleashed.aioruckus.AjaxSession.login",
-        return_value={
-            asyncio.Future(),
-        },
-    ), patch(
-        "homeassistant.components.ruckus_unleashed.aioruckus.RuckusAjaxApi.get_system_info",
-        new_callable=AsyncMock,
-    ) as async_mock_get_system_info, patch(
-        "homeassistant.components.ruckus_unleashed.aioruckus.AbcSession",
-        MockAjaxSession,
+        #     "homeassistant.components.ruckus_unleashed.RuckusUnleashedDataUpdateCoordinator._fetch_clients",
+        #     return_value={
+        #         TEST_CLIENT[API_CLIENT_AP_MAC]: TEST_CLIENT,
+        #     },
+        #     # ), patch(
+        #     #     "homeassistant.components.ruckus_unleashed.aioruckus.AjaxSession.login",
+        #     #     return_value={
+        #     #         asyncio.Future(),
+        #     #     },
+        # ), patch(
+        #     "homeassistant.components.ruckus_unleashed.AjaxSession.RuckusAjaxApi.get_system_info",
+        #     new_callable=AsyncMock,
+        # ) as async_mock_get_system_info, patch(
+        "homeassistant.components.ruckus_unleashed.AjaxSession",
+        # MockAjaxSession,
+        MockSession,
     ):
-        async_mock_get_system_info.return_value = DEFAULT_SYSTEM_INFO
+        # async_mock_get_system_info.return_value = DEFAULT_SYSTEM_INFO
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
