@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 import sys
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -91,6 +92,24 @@ def make_key_event(
 def make_inotify_event(name: str, mask: int) -> SimpleNamespace:
     """Create a mock inotify event."""
     return SimpleNamespace(name=name, mask=mask)
+
+
+def mock_monotonic(*values: float) -> Callable[[], float]:
+    """Create a mock for time.monotonic that returns values then falls back to real.
+
+    The event loop also calls time.monotonic() internally (e.g., in call_later),
+    so we provide specified values first and then fall back to the real
+    implementation for any additional calls.
+    """
+    real = time.monotonic
+    vals = list(values)
+
+    def _monotonic() -> float:
+        if vals:
+            return vals.pop(0)
+        return real()
+
+    return _monotonic
 
 
 @pytest.fixture

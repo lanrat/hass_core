@@ -776,3 +776,75 @@ def test_resolve_yaml_empty_data() -> None:
         result = _resolve_yaml_device({})
 
     assert result == (None, None, None)
+
+
+async def test_options_flow_rejects_long_click_min_exceeds_threshold(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test options flow shows error when long_click_min > click_threshold."""
+    mock_config_entry.add_to_hass(hass)
+    with patch(
+        "homeassistant.components.keyboard_remote.async_setup_entry",
+        return_value=True,
+    ):
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+
+    # Submit with long_click_min (0.5) > click_threshold (0.3) — creates dead zone
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_KEY_TYPES: ["key_up", "click", "long_click"],
+            CONF_EMULATE_KEY_HOLD: DEFAULT_EMULATE_KEY_HOLD,
+            CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
+            CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+            CONF_CLICK_THRESHOLD: 0.3,
+            CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+            CONF_LONG_CLICK_MIN: 0.5,
+            CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
+        },
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "long_click_min_exceeds_threshold"}
+
+
+async def test_options_flow_rejects_long_click_min_exceeds_max(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test options flow shows error when long_click_min > long_click_max."""
+    mock_config_entry.add_to_hass(hass)
+    with patch(
+        "homeassistant.components.keyboard_remote.async_setup_entry",
+        return_value=True,
+    ):
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+
+    # Submit with long_click_min (1.0) <= click_threshold (2.0) but > long_click_max (0.5)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_KEY_TYPES: ["key_up", "long_click"],
+            CONF_EMULATE_KEY_HOLD: DEFAULT_EMULATE_KEY_HOLD,
+            CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
+            CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+            CONF_CLICK_THRESHOLD: 2.0,
+            CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+            CONF_LONG_CLICK_MIN: 1.0,
+            CONF_LONG_CLICK_MAX: 0.5,
+        },
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "long_click_min_exceeds_max"}

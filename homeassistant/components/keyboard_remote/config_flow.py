@@ -298,14 +298,23 @@ class KeyboardRemoteOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            if user_input[CONF_LONG_CLICK_MIN] > user_input[CONF_CLICK_THRESHOLD]:
+                errors["base"] = "long_click_min_exceeds_threshold"
+            elif user_input[CONF_LONG_CLICK_MIN] > user_input[CONF_LONG_CLICK_MAX]:
+                errors["base"] = "long_click_min_exceeds_max"
+
+            if not errors:
+                return self.async_create_entry(data=user_input)
 
         device_path = self.config_entry.data.get(CONF_DEVICE_PATH, "")
 
         return self.async_show_form(
             step_id="init",
             description_placeholders={"device_path": device_path},
+            errors=errors,
             data_schema=self.add_suggested_values_to_schema(
                 vol.Schema(
                     {
@@ -407,6 +416,6 @@ class KeyboardRemoteOptionsFlow(OptionsFlowWithReload):
                         ),
                     }
                 ),
-                self.config_entry.options,
+                user_input or self.config_entry.options,
             ),
         )

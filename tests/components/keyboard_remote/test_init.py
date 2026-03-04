@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from contextlib import suppress
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from asyncinotify import Mask
@@ -55,22 +53,10 @@ from .conftest import (
     FAKE_DEVICE_REAL_PATH,
     MockAsyncIterator,
     make_key_event,
+    mock_monotonic,
 )
 
 from tests.common import MockConfigEntry, async_capture_events
-
-
-def _mock_monotonic(*values: float) -> Callable[[], float]:
-    """Create a mock for time.monotonic with fallback to real implementation."""
-    real = time.monotonic
-    vals = list(values)
-
-    def _monotonic() -> float:
-        if vals:
-            return vals.pop(0)
-        return real()
-
-    return _monotonic
 
 
 @pytest.fixture(autouse=True)
@@ -1066,7 +1052,7 @@ async def test_monitor_input_fires_click_event(
         [key_down, key_up]
     )
 
-    with patch("time.monotonic", side_effect=_mock_monotonic(0.0, 0.1)):
+    with patch("time.monotonic", side_effect=mock_monotonic(0.0, 0.1)):
         await handler.async_device_start_monitoring(mock_input_device)
         await hass.async_block_till_done()
 
@@ -1112,7 +1098,7 @@ async def test_monitor_input_fires_long_click_event(
         [key_down, key_up]
     )
 
-    with patch("time.monotonic", side_effect=_mock_monotonic(0.0, 1.0)):
+    with patch("time.monotonic", side_effect=mock_monotonic(0.0, 1.0)):
         await handler.async_device_start_monitoring(mock_input_device)
         await hass.async_block_till_done()
 
@@ -1180,7 +1166,7 @@ async def test_monitor_input_raw_and_click_events_coexist(
         [key_down, key_up]
     )
 
-    with patch("time.monotonic", side_effect=_mock_monotonic(0.0, 0.1)):
+    with patch("time.monotonic", side_effect=mock_monotonic(0.0, 0.1)):
         await handler.async_device_start_monitoring(mock_input_device)
         await hass.async_block_till_done()
 
@@ -1229,7 +1215,7 @@ async def test_monitor_input_oserror_cleans_up_click_detector(
 
     mock_input_device.async_read_loop.return_value = _events_then_error()
 
-    with patch("time.monotonic", side_effect=_mock_monotonic(0.0, 0.1)):
+    with patch("time.monotonic", side_effect=mock_monotonic(0.0, 0.1)):
         await handler.async_device_start_monitoring(mock_input_device)
         await hass.async_block_till_done()
 

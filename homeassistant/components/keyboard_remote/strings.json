@@ -33,6 +33,10 @@
     }
   },
   "options": {
+    "error": {
+      "long_click_min_exceeds_max": "Long click minimum duration must not exceed long click maximum duration.",
+      "long_click_min_exceeds_threshold": "Long click minimum duration must not exceed click threshold, otherwise presses between these values will not fire any event."
+    },
     "step": {
       "init": {
         "data": {
