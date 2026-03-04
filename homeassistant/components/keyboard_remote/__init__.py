@@ -15,24 +15,34 @@ if TYPE_CHECKING:
     from evdev import InputDevice
 
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
-from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN, HomeAssistant
+from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN, HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.start import async_at_start
 from homeassistant.helpers.typing import ConfigType
 
+from .click_detector import ClickEventType, KeyClickDetector
 from .const import (
+    CALCULATED_KEY_TYPES,
+    CONF_CLICK_THRESHOLD,
     CONF_DEVICE_DESCRIPTOR,
     CONF_DEVICE_NAME,
     CONF_DEVICE_PATH,
+    CONF_DOUBLE_CLICK_TIMEOUT,
     CONF_EMULATE_KEY_HOLD,
     CONF_EMULATE_KEY_HOLD_DELAY,
     CONF_EMULATE_KEY_HOLD_REPEAT,
     CONF_KEY_TYPES,
+    CONF_LONG_CLICK_MAX,
+    CONF_LONG_CLICK_MIN,
+    DEFAULT_CLICK_THRESHOLD,
+    DEFAULT_DOUBLE_CLICK_TIMEOUT,
     DEFAULT_EMULATE_KEY_HOLD,
     DEFAULT_EMULATE_KEY_HOLD_DELAY,
     DEFAULT_EMULATE_KEY_HOLD_REPEAT,
     DEFAULT_KEY_TYPES,
+    DEFAULT_LONG_CLICK_MAX,
+    DEFAULT_LONG_CLICK_MIN,
     DEVINPUT,
     DOMAIN,
     EVENT_KEYBOARD_REMOTE_COMMAND_RECEIVED,
@@ -400,9 +410,41 @@ class DeviceHandler:
 
     @property
     def _key_values(self) -> set[int]:
-        """Key event values to monitor."""
+        """Raw key event values to monitor (excludes calculated types)."""
         key_types = self.entry.options.get(CONF_KEY_TYPES, DEFAULT_KEY_TYPES)
-        return {KEY_VALUE[kt] for kt in key_types}
+        return {KEY_VALUE[kt] for kt in key_types if kt not in CALCULATED_KEY_TYPES}
+
+    @property
+    def _configured_key_types(self) -> set[str]:
+        """All configured key types including calculated ones."""
+        return set(self.entry.options.get(CONF_KEY_TYPES, DEFAULT_KEY_TYPES))
+
+    @property
+    def _has_calculated_types(self) -> bool:
+        """Whether any calculated event types are configured."""
+        return bool(self._configured_key_types & CALCULATED_KEY_TYPES)
+
+    @property
+    def _click_threshold(self) -> float:
+        """Maximum press duration for a click."""
+        return self.entry.options.get(CONF_CLICK_THRESHOLD, DEFAULT_CLICK_THRESHOLD)
+
+    @property
+    def _double_click_timeout(self) -> float:
+        """Timeout window for double-click detection."""
+        return self.entry.options.get(
+            CONF_DOUBLE_CLICK_TIMEOUT, DEFAULT_DOUBLE_CLICK_TIMEOUT
+        )
+
+    @property
+    def _long_click_min(self) -> float:
+        """Minimum press duration for long click."""
+        return self.entry.options.get(CONF_LONG_CLICK_MIN, DEFAULT_LONG_CLICK_MIN)
+
+    @property
+    def _long_click_max(self) -> float:
+        """Maximum press duration for long click."""
+        return self.entry.options.get(CONF_LONG_CLICK_MAX, DEFAULT_LONG_CLICK_MAX)
 
     @property
     def _emulate_key_hold(self) -> bool:
@@ -517,6 +559,27 @@ class DeviceHandler:
             )
             await asyncio.sleep(repeat)
 
+    @callback
+    def _fire_click_event(self, key_code: int, click_type: ClickEventType) -> None:
+        """Fire a calculated click event on the HA bus."""
+        dev = self.dev
+        assert dev is not None
+        _LOGGER.debug(
+            "device: %s: %s key_code %s",
+            dev.name,
+            click_type.value,
+            key_code,
+        )
+        self.hass.bus.async_fire(
+            EVENT_KEYBOARD_REMOTE_COMMAND_RECEIVED,
+            {
+                KEY_CODE: key_code,
+                "type": click_type.value,
+                CONF_DEVICE_DESCRIPTOR: self._descriptor,
+                CONF_DEVICE_NAME: dev.name,
+            },
+        )
+
     async def _async_monitor_input(self) -> None:
         """Monitor one device for key events using evdev with asyncio."""
         from evdev import categorize, ecodes  # noqa: PLC0415
@@ -524,6 +587,22 @@ class DeviceHandler:
         dev = self.dev
         assert dev is not None
         repeat_tasks: dict[int, asyncio.Task] = {}
+
+        # Create click detector if any calculated types are configured
+        click_detector: KeyClickDetector | None = None
+        if self._has_calculated_types:
+            configured = self._configured_key_types
+            click_detector = KeyClickDetector(
+                hass=self.hass,
+                fire_event=self._fire_click_event,
+                click_enabled="click" in configured,
+                double_click_enabled="double_click" in configured,
+                long_click_enabled="long_click" in configured,
+                click_threshold=self._click_threshold,
+                double_click_timeout=self._double_click_timeout,
+                long_click_min=self._long_click_min,
+                long_click_max=self._long_click_max,
+            )
 
         try:
             _LOGGER.debug("Start device monitoring")
@@ -547,6 +626,13 @@ class DeviceHandler:
                             },
                         )
 
+                    # Feed click detector (always needs key_down/key_up)
+                    if click_detector is not None:
+                        if event.value == KEY_VALUE["key_down"]:
+                            click_detector.on_key_down(event.code)
+                        elif event.value == KEY_VALUE["key_up"]:
+                            click_detector.on_key_up(event.code)
+
                     if event.value == KEY_VALUE["key_down"] and self._emulate_key_hold:
                         repeat_tasks[event.code] = self.hass.async_create_task(
                             self._async_keyrepeat(
@@ -569,3 +655,7 @@ class DeviceHandler:
 
             if repeat_tasks:
                 await asyncio.wait(repeat_tasks.values())
+
+            # Cancel click detector timers
+            if click_detector is not None:
+                click_detector.cancel_all()

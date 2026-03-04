@@ -36,16 +36,24 @@
     "step": {
       "init": {
         "data": {
+          "click_threshold": "Click threshold",
+          "double_click_timeout": "Double-click timeout",
           "emulate_key_hold": "Emulate key hold",
           "emulate_key_hold_delay": "Key hold delay",
           "emulate_key_hold_repeat": "Key hold repeat interval",
-          "key_types": "Key event types"
+          "key_types": "Key event types",
+          "long_click_max": "Long click maximum duration",
+          "long_click_min": "Long click minimum duration"
         },
         "data_description": {
+          "click_threshold": "Maximum press duration in seconds to count as a short click. Presses longer than this are evaluated as a long click instead.",
+          "double_click_timeout": "Maximum gap in seconds between two clicks to register as a double-click. This adds latency to single-click events, as the system waits for a possible second press.",
           "emulate_key_hold": "Enable software emulation of key hold events.",
           "emulate_key_hold_delay": "Delay in seconds before key hold emulation starts.",
           "emulate_key_hold_repeat": "Repeat interval in seconds for emulated key hold events.",
-          "key_types": "Select which key events to listen for."
+          "key_types": "Select which key events to listen for. Click, double click, and long click are calculated from key press and release timing.",
+          "long_click_max": "Maximum press duration in seconds for a long-click event. Presses held longer than this do not fire any calculated event.",
+          "long_click_min": "Minimum press duration in seconds to fire a long-click event."
         },
         "description": "Device path: `{device_path}`",
         "title": "Keyboard Remote options"

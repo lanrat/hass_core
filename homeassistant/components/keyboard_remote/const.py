@@ -16,12 +16,23 @@ CONF_KEY_TYPES: Final = "key_types"
 CONF_EMULATE_KEY_HOLD: Final = "emulate_key_hold"
 CONF_EMULATE_KEY_HOLD_DELAY: Final = "emulate_key_hold_delay"
 CONF_EMULATE_KEY_HOLD_REPEAT: Final = "emulate_key_hold_repeat"
+CONF_CLICK_THRESHOLD: Final = "click_threshold"
+CONF_DOUBLE_CLICK_TIMEOUT: Final = "double_click_timeout"
+CONF_LONG_CLICK_MIN: Final = "long_click_min"
+CONF_LONG_CLICK_MAX: Final = "long_click_max"
 
 # Defaults
 DEFAULT_KEY_TYPES: Final = ["key_up"]
 DEFAULT_EMULATE_KEY_HOLD: Final = False
 DEFAULT_EMULATE_KEY_HOLD_DELAY: Final = 0.250
 DEFAULT_EMULATE_KEY_HOLD_REPEAT: Final = 0.033
+DEFAULT_CLICK_THRESHOLD: Final = 0.400
+DEFAULT_DOUBLE_CLICK_TIMEOUT: Final = 0.300
+DEFAULT_LONG_CLICK_MIN: Final = 0.400
+DEFAULT_LONG_CLICK_MAX: Final = 3.000
+
+# Calculated event types (derived from key_down/key_up timing)
+CALCULATED_KEY_TYPES: Final = frozenset({"click", "double_click", "long_click"})
 
 # Key value mapping
 KEY_VALUE: Final = {"key_up": 0, "key_down": 1, "key_hold": 2}

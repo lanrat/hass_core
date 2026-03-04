@@ -13,17 +13,25 @@ from homeassistant.components.keyboard_remote.config_flow import (
     _scan_input_devices_sync,
 )
 from homeassistant.components.keyboard_remote.const import (
+    CONF_CLICK_THRESHOLD,
     CONF_DEVICE_DESCRIPTOR,
     CONF_DEVICE_NAME,
     CONF_DEVICE_PATH,
+    CONF_DOUBLE_CLICK_TIMEOUT,
     CONF_EMULATE_KEY_HOLD,
     CONF_EMULATE_KEY_HOLD_DELAY,
     CONF_EMULATE_KEY_HOLD_REPEAT,
     CONF_KEY_TYPES,
+    CONF_LONG_CLICK_MAX,
+    CONF_LONG_CLICK_MIN,
+    DEFAULT_CLICK_THRESHOLD,
+    DEFAULT_DOUBLE_CLICK_TIMEOUT,
     DEFAULT_EMULATE_KEY_HOLD,
     DEFAULT_EMULATE_KEY_HOLD_DELAY,
     DEFAULT_EMULATE_KEY_HOLD_REPEAT,
     DEFAULT_KEY_TYPES,
+    DEFAULT_LONG_CLICK_MAX,
+    DEFAULT_LONG_CLICK_MIN,
     DOMAIN,
 )
 from homeassistant.config_entries import SOURCE_IMPORT, SOURCE_USER
@@ -104,6 +112,10 @@ async def test_user_step_creates_entry(hass: HomeAssistant) -> None:
         CONF_EMULATE_KEY_HOLD: DEFAULT_EMULATE_KEY_HOLD,
         CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
         CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+        CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+        CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+        CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+        CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
     }
 
 
@@ -356,6 +368,10 @@ async def test_import_default_options(hass: HomeAssistant) -> None:
         CONF_EMULATE_KEY_HOLD: DEFAULT_EMULATE_KEY_HOLD,
         CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
         CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+        CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+        CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+        CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+        CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
     }
 
 
@@ -387,6 +403,10 @@ async def test_options_flow(
             CONF_EMULATE_KEY_HOLD: True,
             CONF_EMULATE_KEY_HOLD_DELAY: 0.5,
             CONF_EMULATE_KEY_HOLD_REPEAT: 0.05,
+            CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+            CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+            CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+            CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
         },
     )
     await hass.async_block_till_done()
@@ -397,6 +417,10 @@ async def test_options_flow(
         CONF_EMULATE_KEY_HOLD: True,
         CONF_EMULATE_KEY_HOLD_DELAY: 0.5,
         CONF_EMULATE_KEY_HOLD_REPEAT: 0.05,
+        CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+        CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+        CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+        CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
     }
 
 
@@ -417,6 +441,51 @@ async def test_options_flow_shows_device_path(
 
     assert result["type"] is FlowResultType.FORM
     assert result["description_placeholders"]["device_path"] == FAKE_DEVICE_PATH
+
+
+async def test_options_flow_with_click_settings(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test the options flow persists click detection settings."""
+    mock_config_entry.add_to_hass(hass)
+    with patch(
+        "homeassistant.components.keyboard_remote.async_setup_entry",
+        return_value=True,
+    ):
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_KEY_TYPES: ["key_up", "click", "double_click", "long_click"],
+            CONF_EMULATE_KEY_HOLD: False,
+            CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
+            CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+            CONF_CLICK_THRESHOLD: 0.5,
+            CONF_DOUBLE_CLICK_TIMEOUT: 0.25,
+            CONF_LONG_CLICK_MIN: 0.5,
+            CONF_LONG_CLICK_MAX: 2.0,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_KEY_TYPES] == [
+        "key_up",
+        "click",
+        "double_click",
+        "long_click",
+    ]
+    assert result["data"][CONF_CLICK_THRESHOLD] == 0.5
+    assert result["data"][CONF_DOUBLE_CLICK_TIMEOUT] == 0.25
+    assert result["data"][CONF_LONG_CLICK_MIN] == 0.5
+    assert result["data"][CONF_LONG_CLICK_MAX] == 2.0
 
 
 # --- _get_device_name tests ---

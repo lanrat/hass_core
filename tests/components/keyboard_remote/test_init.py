@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextlib import suppress
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from asyncinotify import Mask
@@ -16,16 +18,24 @@ from homeassistant.components.keyboard_remote import (
     async_setup,
 )
 from homeassistant.components.keyboard_remote.const import (
+    CONF_CLICK_THRESHOLD,
     CONF_DEVICE_DESCRIPTOR,
     CONF_DEVICE_NAME,
     CONF_DEVICE_PATH,
+    CONF_DOUBLE_CLICK_TIMEOUT,
     CONF_EMULATE_KEY_HOLD,
     CONF_EMULATE_KEY_HOLD_DELAY,
     CONF_EMULATE_KEY_HOLD_REPEAT,
     CONF_KEY_TYPES,
+    CONF_LONG_CLICK_MAX,
+    CONF_LONG_CLICK_MIN,
+    DEFAULT_CLICK_THRESHOLD,
+    DEFAULT_DOUBLE_CLICK_TIMEOUT,
     DEFAULT_EMULATE_KEY_HOLD,
     DEFAULT_EMULATE_KEY_HOLD_DELAY,
     DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+    DEFAULT_LONG_CLICK_MAX,
+    DEFAULT_LONG_CLICK_MIN,
     DOMAIN,
     EVENT_KEYBOARD_REMOTE_COMMAND_RECEIVED,
     EVENT_KEYBOARD_REMOTE_CONNECTED,
@@ -48,6 +58,19 @@ from .conftest import (
 )
 
 from tests.common import MockConfigEntry, async_capture_events
+
+
+def _mock_monotonic(*values: float) -> Callable[[], float]:
+    """Create a mock for time.monotonic with fallback to real implementation."""
+    real = time.monotonic
+    vals = list(values)
+
+    def _monotonic() -> float:
+        if vals:
+            return vals.pop(0)
+        return real()
+
+    return _monotonic
 
 
 @pytest.fixture(autouse=True)
@@ -1004,3 +1027,219 @@ async def test_keyrepeat_fires_hold_events(
     assert len(hold_events) >= 1
     assert hold_events[0].data[KEY_CODE] == 30
     assert hold_events[0].data[CONF_DEVICE_DESCRIPTOR] == FAKE_DEVICE_PATH
+
+
+# --- Click detection integration tests ---
+
+
+async def test_monitor_input_fires_click_event(
+    hass: HomeAssistant,
+    mock_input_device: MagicMock,
+) -> None:
+    """Test click detection fires click event through full pipeline."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=FAKE_BY_ID_BASENAME,
+        data={
+            CONF_DEVICE_PATH: FAKE_DEVICE_PATH,
+            CONF_DEVICE_NAME: FAKE_DEVICE_NAME,
+        },
+        options={
+            CONF_KEY_TYPES: ["click"],
+            CONF_EMULATE_KEY_HOLD: False,
+            CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
+            CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+            CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+            CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+            CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+            CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
+        },
+    )
+    entry.add_to_hass(hass)
+    handler = DeviceHandler(hass, entry)
+    events = async_capture_events(hass, EVENT_KEYBOARD_REMOTE_COMMAND_RECEIVED)
+
+    # Short press: key_down then key_up
+    key_down = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_down"])
+    key_up = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_up"])
+    mock_input_device.async_read_loop.return_value = MockAsyncIterator(
+        [key_down, key_up]
+    )
+
+    with patch("time.monotonic", side_effect=_mock_monotonic(0.0, 0.1)):
+        await handler.async_device_start_monitoring(mock_input_device)
+        await hass.async_block_till_done()
+
+    # Should have a click event (no double_click enabled, fires immediately)
+    click_events = [e for e in events if e.data["type"] == "click"]
+    assert len(click_events) == 1
+    assert click_events[0].data[KEY_CODE] == 30
+    assert click_events[0].data[CONF_DEVICE_DESCRIPTOR] == FAKE_DEVICE_PATH
+    assert click_events[0].data[CONF_DEVICE_NAME] == FAKE_DEVICE_NAME
+
+
+async def test_monitor_input_fires_long_click_event(
+    hass: HomeAssistant,
+    mock_input_device: MagicMock,
+) -> None:
+    """Test click detection fires long_click event for held press."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=FAKE_BY_ID_BASENAME,
+        data={
+            CONF_DEVICE_PATH: FAKE_DEVICE_PATH,
+            CONF_DEVICE_NAME: FAKE_DEVICE_NAME,
+        },
+        options={
+            CONF_KEY_TYPES: ["long_click"],
+            CONF_EMULATE_KEY_HOLD: False,
+            CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
+            CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+            CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+            CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+            CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+            CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
+        },
+    )
+    entry.add_to_hass(hass)
+    handler = DeviceHandler(hass, entry)
+    events = async_capture_events(hass, EVENT_KEYBOARD_REMOTE_COMMAND_RECEIVED)
+
+    # Long press: key_down then key_up after 1.0s
+    key_down = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_down"])
+    key_up = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_up"])
+    mock_input_device.async_read_loop.return_value = MockAsyncIterator(
+        [key_down, key_up]
+    )
+
+    with patch("time.monotonic", side_effect=_mock_monotonic(0.0, 1.0)):
+        await handler.async_device_start_monitoring(mock_input_device)
+        await hass.async_block_till_done()
+
+    long_click_events = [e for e in events if e.data["type"] == "long_click"]
+    assert len(long_click_events) == 1
+    assert long_click_events[0].data[KEY_CODE] == 30
+
+
+async def test_monitor_input_no_click_events_when_not_configured(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_input_device: MagicMock,
+) -> None:
+    """Test no calculated events fire when no calculated types configured."""
+    mock_config_entry.add_to_hass(hass)
+    handler = DeviceHandler(hass, mock_config_entry)
+    events = async_capture_events(hass, EVENT_KEYBOARD_REMOTE_COMMAND_RECEIVED)
+
+    # Short press
+    key_down = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_down"])
+    key_up = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_up"])
+    mock_input_device.async_read_loop.return_value = MockAsyncIterator(
+        [key_down, key_up]
+    )
+
+    await handler.async_device_start_monitoring(mock_input_device)
+    await hass.async_block_till_done()
+
+    # Only key_up should fire (default key_types), no click events
+    click_events = [e for e in events if e.data["type"] == "click"]
+    assert len(click_events) == 0
+
+
+async def test_monitor_input_raw_and_click_events_coexist(
+    hass: HomeAssistant,
+    mock_input_device: MagicMock,
+) -> None:
+    """Test raw key_up events fire alongside calculated click events."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=FAKE_BY_ID_BASENAME,
+        data={
+            CONF_DEVICE_PATH: FAKE_DEVICE_PATH,
+            CONF_DEVICE_NAME: FAKE_DEVICE_NAME,
+        },
+        options={
+            CONF_KEY_TYPES: ["key_up", "key_down", "click"],
+            CONF_EMULATE_KEY_HOLD: False,
+            CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
+            CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+            CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+            CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+            CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+            CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
+        },
+    )
+    entry.add_to_hass(hass)
+    handler = DeviceHandler(hass, entry)
+    events = async_capture_events(hass, EVENT_KEYBOARD_REMOTE_COMMAND_RECEIVED)
+
+    # Short press
+    key_down = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_down"])
+    key_up = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_up"])
+    mock_input_device.async_read_loop.return_value = MockAsyncIterator(
+        [key_down, key_up]
+    )
+
+    with patch("time.monotonic", side_effect=_mock_monotonic(0.0, 0.1)):
+        await handler.async_device_start_monitoring(mock_input_device)
+        await hass.async_block_till_done()
+
+    # Should have key_down, key_up (raw), and click (calculated)
+    event_types = [e.data["type"] for e in events]
+    assert "key_down" in event_types
+    assert "key_up" in event_types
+    assert "click" in event_types
+
+
+async def test_monitor_input_oserror_cleans_up_click_detector(
+    hass: HomeAssistant,
+    mock_input_device: MagicMock,
+) -> None:
+    """Test OSError during monitoring cleans up click detector timers."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=FAKE_BY_ID_BASENAME,
+        data={
+            CONF_DEVICE_PATH: FAKE_DEVICE_PATH,
+            CONF_DEVICE_NAME: FAKE_DEVICE_NAME,
+        },
+        options={
+            CONF_KEY_TYPES: ["click", "double_click"],
+            CONF_EMULATE_KEY_HOLD: False,
+            CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
+            CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+            CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+            CONF_DOUBLE_CLICK_TIMEOUT: 999,
+            CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+            CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
+        },
+    )
+    entry.add_to_hass(hass)
+    handler = DeviceHandler(hass, entry)
+    events = async_capture_events(hass, EVENT_KEYBOARD_REMOTE_COMMAND_RECEIVED)
+
+    # key_down + key_up (enters WAIT_DOUBLE_CLICK), then OSError
+    key_down = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_down"])
+    key_up = make_key_event(event_type=EV_KEY, code=30, value=KEY_VALUE["key_up"])
+
+    async def _events_then_error():
+        yield key_down
+        yield key_up
+        raise OSError("Device removed")
+
+    mock_input_device.async_read_loop.return_value = _events_then_error()
+
+    with patch("time.monotonic", side_effect=_mock_monotonic(0.0, 0.1)):
+        await handler.async_device_start_monitoring(mock_input_device)
+        await hass.async_block_till_done()
+
+    # Monitor task should complete without raising
+    assert handler._monitor_task is not None
+    assert handler._monitor_task.done()
+
+    # Wait longer than double_click_timeout to ensure no stale click fires
+    await asyncio.sleep(0.05)
+
+    # No click event should fire (detector was cancelled)
+    click_events = [e for e in events if e.data["type"] == "click"]
+    assert len(click_events) == 0

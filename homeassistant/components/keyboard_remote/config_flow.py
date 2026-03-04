@@ -18,17 +18,25 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_CLICK_THRESHOLD,
     CONF_DEVICE_DESCRIPTOR,
     CONF_DEVICE_NAME,
     CONF_DEVICE_PATH,
+    CONF_DOUBLE_CLICK_TIMEOUT,
     CONF_EMULATE_KEY_HOLD,
     CONF_EMULATE_KEY_HOLD_DELAY,
     CONF_EMULATE_KEY_HOLD_REPEAT,
     CONF_KEY_TYPES,
+    CONF_LONG_CLICK_MAX,
+    CONF_LONG_CLICK_MIN,
+    DEFAULT_CLICK_THRESHOLD,
+    DEFAULT_DOUBLE_CLICK_TIMEOUT,
     DEFAULT_EMULATE_KEY_HOLD,
     DEFAULT_EMULATE_KEY_HOLD_DELAY,
     DEFAULT_EMULATE_KEY_HOLD_REPEAT,
     DEFAULT_KEY_TYPES,
+    DEFAULT_LONG_CLICK_MAX,
+    DEFAULT_LONG_CLICK_MIN,
     DEVINPUT,
     DEVINPUT_BY_ID,
     DOMAIN,
@@ -187,6 +195,10 @@ class KeyboardRemoteConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_EMULATE_KEY_HOLD: DEFAULT_EMULATE_KEY_HOLD,
                         CONF_EMULATE_KEY_HOLD_DELAY: DEFAULT_EMULATE_KEY_HOLD_DELAY,
                         CONF_EMULATE_KEY_HOLD_REPEAT: DEFAULT_EMULATE_KEY_HOLD_REPEAT,
+                        CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+                        CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+                        CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+                        CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
                     },
                 )
 
@@ -271,6 +283,10 @@ class KeyboardRemoteConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_EMULATE_KEY_HOLD: emulate_hold,
                 CONF_EMULATE_KEY_HOLD_DELAY: emulate_delay,
                 CONF_EMULATE_KEY_HOLD_REPEAT: emulate_repeat,
+                CONF_CLICK_THRESHOLD: DEFAULT_CLICK_THRESHOLD,
+                CONF_DOUBLE_CLICK_TIMEOUT: DEFAULT_DOUBLE_CLICK_TIMEOUT,
+                CONF_LONG_CLICK_MIN: DEFAULT_LONG_CLICK_MIN,
+                CONF_LONG_CLICK_MAX: DEFAULT_LONG_CLICK_MAX,
             },
         )
 
@@ -305,6 +321,16 @@ class KeyboardRemoteOptionsFlow(OptionsFlowWithReload):
                                     selector.SelectOptionDict(
                                         value="key_hold", label="Key hold"
                                     ),
+                                    selector.SelectOptionDict(
+                                        value="click", label="Click"
+                                    ),
+                                    selector.SelectOptionDict(
+                                        value="double_click",
+                                        label="Double click",
+                                    ),
+                                    selector.SelectOptionDict(
+                                        value="long_click", label="Long click"
+                                    ),
                                 ],
                                 multiple=True,
                                 mode=selector.SelectSelectorMode.LIST,
@@ -331,6 +357,50 @@ class KeyboardRemoteOptionsFlow(OptionsFlowWithReload):
                                 min=0.001,
                                 max=1.0,
                                 step=0.001,
+                                unit_of_measurement="s",
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Required(
+                            CONF_CLICK_THRESHOLD,
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.1,
+                                max=2.0,
+                                step=0.01,
+                                unit_of_measurement="s",
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Required(
+                            CONF_DOUBLE_CLICK_TIMEOUT,
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.1,
+                                max=1.0,
+                                step=0.01,
+                                unit_of_measurement="s",
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Required(
+                            CONF_LONG_CLICK_MIN,
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.1,
+                                max=5.0,
+                                step=0.01,
+                                unit_of_measurement="s",
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Required(
+                            CONF_LONG_CLICK_MAX,
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.5,
+                                max=10.0,
+                                step=0.1,
                                 unit_of_measurement="s",
                                 mode=selector.NumberSelectorMode.BOX,
                             )
